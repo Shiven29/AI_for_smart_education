@@ -1,8 +1,10 @@
+from datetime import date
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from data.career_data import CAREER_DATA, VALID_CAREERS
 from data.interview_data import INTERVIEW_DATA
+
 from models.schemas import (
     CareerAnalyzeRequest,
     CareerAnalyzeResponse,
@@ -12,6 +14,10 @@ from models.schemas import (
     InterviewGenerateResponse,
     InterviewEvaluateRequest,
     InterviewEvaluateResponse,
+    StudyPlanRequest,
+    StudyPlanResponse,
+    AITutorRequest,
+    AITutorResponse,
 )
 from services.analyzer import analyze_career
 from services.resume_analyzer import analyze_resume
@@ -19,7 +25,8 @@ from services.interview_analyzer import (
     generate_interview_questions,
     evaluate_answer,
 )
-
+from services.study_planner import generate_study_plan
+from services.ai_service import ask_ai_tutor
 
 
 app = FastAPI(
@@ -184,3 +191,106 @@ def evaluate_interview_endpoint(request: InterviewEvaluateRequest):
     )
 
     return result
+
+# ---------------------------------------------------------------------------
+# Phase 4: Personalized Study Planner
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/api/study-plan/generate",
+    response_model=StudyPlanResponse
+)
+def generate_study_plan_endpoint(request: StudyPlanRequest):
+
+    """
+    Generates a personalized study plan based on the student's
+    target date, available daily study hours, subjects, and weak subjects.
+    """
+
+    today = date.today()
+
+    # Validate target date
+    if request.target_date <= today:
+        raise HTTPException(
+            status_code=400,
+            detail="target_date must be in the future.",
+        )
+
+    # Validate daily hours
+    if request.daily_hours <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="daily_hours must be greater than 0.",
+        )
+
+    # Validate subjects
+    if not request.subjects:
+        raise HTTPException(
+            status_code=400,
+            detail="subjects cannot be empty.",
+        )
+
+    # Validate weak subjects
+    normalized_subjects = {
+        subject.strip().lower()
+        for subject in request.subjects
+    }
+
+    invalid_weak_subjects = [
+        subject
+        for subject in request.weak_subjects
+        if subject.strip().lower() not in normalized_subjects
+    ]
+
+    if invalid_weak_subjects:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "weak_subjects contains subjects not present "
+                f"in subjects: {invalid_weak_subjects}"
+            ),
+        )
+
+    result = generate_study_plan(
+        name=request.name,
+        target_date=request.target_date,
+        daily_hours=request.daily_hours,
+        subjects=request.subjects,
+        weak_subjects=request.weak_subjects,
+    )
+
+    return result
+
+# ---------------------------------------------------------------------------
+# Phase 5: AI Career Tutor
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/api/ai-tutor",
+    response_model=AITutorResponse
+)
+def ai_tutor_endpoint(request: AITutorRequest):
+
+    if not request.message.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="message cannot be empty."
+        )
+
+    try:
+        response = ask_ai_tutor(
+            message=request.message,
+            career_goal=request.career_goal,
+            student_name=request.student_name,
+            context=request.context
+        )
+
+        return {
+            "response": response
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI Tutor error: {str(e)}"
+        )
